@@ -1,5 +1,5 @@
 #!/bin/sh
-
+. /etc/environment
 # IP blacklisting script for Linux servers
 # Pawel Krawczyk 2014-2015
 # documentation https://github.com/kravietz/blacklist-scripts
@@ -16,33 +16,54 @@ if [ -f "${config_file}" ]; then
 else
     # if no config file is available, load default set of blacklists
     # URLs for further blocklists are appended using the classical
-    # shell syntax:  "$URLS new_url"
+    # shell syntax:  "$URLS [SETNAME|]new_url"
 
     # Emerging Threats lists offensive IPs such as botnet command servers
-    URLS="http://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+    URLS="emergingthreats.net|https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+
+    # spamhaus drop and edrop
+    URLS="$URLS spamhaus_drop|https://www.spamhaus.org/drop/drop.txt"
+    URLS="$URLS spamhaus_drop|https://www.spamhaus.org/drop/edrop.txt"
 
     # Blocklist.de collects reports from fail2ban probes, listing password brute-forces, scanners and other offenders
-    URLS="$URLS https://www.blocklist.de/downloads/export-ips_all.txt"
+    URLS="$URLS blocklist.de|https://www.blocklist.de/downloads/export-ips_all.txt"
 
     # badips.com, from score 2 up
-    URLS="$URLS http://www.badips.com/get/list/ssh/2"
+    #URLS="$URLS badips.com|https://www.badips.com/get/list/any/1?age=2w"
+
+    # FireHOL level1 list is composition of other IP lists: fullbogons, spamhaus drop and edrop, dshield, malware lists
+    # WARNING! fullbogons list includes local and private IP ranges like 127.0.0.0/8 and 10.0.0.0/8
+    #URLS="$URLS firehol.org|https://iplists.firehol.org/files/firehol_level1.netset"
 
     # iblocklist.com is also supported
-    # URLS="$URLS http://list.iblocklist.com/?list=srzondksmjuwsvmgdbhi&fileformat=p2p&archiveformat=gz&username=USERNAMEx$&pin=PIN"
+    # URLS="$URLS iblocklist.com|http://list.iblocklist.com/?list=srzondksmjuwsvmgdbhi&fileformat=p2p&archiveformat=gz&username=USERNAMEx$&pin=PIN"
+    # converted copy of iblocklist.com  http://iplists.firehol.org/?ipset=iblocklist_ciarmy_malicious
+    #URLS = "$URLS iblocklist_ciarmy_malicious|https://iplists.firehol.org/files/iblocklist_ciarmy_malicious.netset"
+    # original source list
+    URLS="$URLS https://cinsscore.com/list/ci-badguys.txt"
+
+    # blocklist.net.ua
+    # WARNING! blocklist.net.ua list includes local and private IP ranges like 127.0.0.0/8 and 10.0.0.0/8
+    # URLS="$URLS blocklist_net_ua|https://iplists.firehol.org/files/blocklist_net_ua.ipset"
+
+    # Cisco TALOS IP blocklist
+    URLS="$URLS talosintelligence.com|https://talosintelligence.com/documents/ip-blacklist"
 fi
 
 link_set () {
+  if ! iptables -nL | grep -qE "^DROP.*\s+match-set $2\s+.*$"; then
     if [ "$3" = "log" ]; then
         iptables -A "$1" -m set --match-set "$2" src,dst -m limit --limit "$LIMIT" -j LOG --log-prefix "BLOCK $2 "
     fi
     iptables -A "$1" -m set --match-set "$2" src -j DROP
     iptables -A "$1" -m set --match-set "$2" dst -j DROP
+  fi
 }
 
 # This is how it will look like on the server
 
 # Chain blocklists (2 references)
-#  pkts bytes target     prot opt in     out     source               destination         
+#  pkts bytes target     prot opt in     out     source               destination
 #     0     0 LOG        all  --  *      *       0.0.0.0/0            0.0.0.0/0            match-set manual-blacklist src,dst limit: avg 10/min burst 5 LOG flags 0 level 4 prefix "BLOCK manual-blacklist "
 #     0     0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            match-set manual-blacklist src,dst
 #     0     0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            match-set rules.emergingthreats src
@@ -68,7 +89,7 @@ fi
 # check if we are on OpenWRT
 if [ "$(which uci 2>/dev/null)" ]; then
     # we're on OpenWRT
-    wan_iface=pppoe-wan
+    wan_iface=$(uci get network.wan.ifname)
     IN_OPT="-i $wan_iface"
     INPUT=input_rule
     FORWARD=forwarding_rule
@@ -90,7 +111,7 @@ if ! iptables -nL ${INPUT} | grep -q ${blocklist_chain_name}; then
 fi
 if ! iptables -nL ${FORWARD} | grep -q ${blocklist_chain_name}; then
   iptables -I ${FORWARD} 1 ${IN_OPT} -j ${blocklist_chain_name}
-fi                                                                 
+fi
 
 # flush the chain referencing blacklists, they will be restored in a second
 iptables -F ${blocklist_chain_name}
@@ -114,7 +135,13 @@ do
     headers=$(mktemp)
 
     # download the blocklist
-    set_name=$(echo "$url" | awk -F/ '{print substr($3,0,21);}') # set name is derived from source URL hostname
+    set_name=$(echo "$url" | cut -d '|' -sf 1)
+    if [ -z "$set_name" ]; then
+        # set name is derived from source URL hostname
+        set_name=$(echo "$url" | awk -F/ '{print substr($3,0,21);}')
+    else
+	url=$(echo "$url" | cut -d '|' -sf 2)
+    fi
     curl -L -v -s ${COMPRESS_OPT} -k "$url" >"${unsorted_blocklist}" 2>"${headers}"
 
     # this is required for blocklist.de that sends compressed content regardless of asked or not
@@ -133,12 +160,12 @@ do
             awk -f /etc/range2cidr.awk <"${unsorted_blocklist}" >"${awk_tmp}"
             mv "${awk_tmp}" "${unsorted_blocklist}"
         else
-            echo "/etc/range2cidr.awk script not found, cannot process ${unsorted_blocklist}, skipping"
+            echo "range2cidr.awk script not found, cannot process ${unsorted_blocklist}, skipping"
             continue
         fi
     fi
 
-    sort -u <"${unsorted_blocklist}" | egrep "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?$" >"${sorted_blocklist}"
+    sort -u <"${unsorted_blocklist}" | sed -nE 's/^(([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?).*$/\1/p' >"${sorted_blocklist}"
 
     # calculate performance parameters for the new set
     if [ "${RANDOM}" ]; then
@@ -171,9 +198,9 @@ do
 
     # actually execute the set update
     ipset -! -q restore < "${new_set_file}"
-    
+
     link_set "${blocklist_chain_name}" "${set_name}" "$1"
 
     # clean up temp files
-    rm "${unsorted_blocklist}" "${sorted_blocklist}" "${new_set_file}" "${headers}"
+    rm -f "${unsorted_blocklist}" "${sorted_blocklist}" "${new_set_file}" "${headers}"
 done
