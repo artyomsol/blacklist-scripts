@@ -113,9 +113,6 @@ if ! iptables -nL ${FORWARD} | grep -q ${blocklist_chain_name}; then
   iptables -I ${FORWARD} 1 ${IN_OPT} -j ${blocklist_chain_name}
 fi
 
-# flush the chain referencing blacklists, they will be restored in a second
-iptables -F ${blocklist_chain_name}
-
 # create the "manual" blacklist set
 # this can be populated manually using ipset command:
 # ipset add manual-blacklist a.b.c.d
@@ -124,6 +121,9 @@ if ! ipset list | grep -q "Name: ${set_name}"; then
     ipset create "${set_name}" hash:net
 fi
 link_set "${blocklist_chain_name}" "${set_name}" "$1"
+
+# collect created set names to exclude them from blocklist chain purge stage
+set_names=${set_name}
 
 # download and process the dynamic blacklists
 for url in $URLS
@@ -140,8 +140,10 @@ do
         # set name is derived from source URL hostname
         set_name=$(echo "$url" | awk -F/ '{print substr($3,0,21);}')
     else
-	url=$(echo "$url" | cut -d '|' -sf 2)
+	      url=$(echo "$url" | cut -d '|' -sf 2)
     fi
+    [ -n "${set_names}" ] && set_names="$set_names|$set_name" || set_names=$set_name
+
     curl -L -v -s ${COMPRESS_OPT} -k "$url" >"${unsorted_blocklist}" 2>"${headers}"
 
     # this is required for blocklist.de that sends compressed content regardless of asked or not
@@ -204,3 +206,8 @@ do
     # clean up temp files
     rm -f "${unsorted_blocklist}" "${sorted_blocklist}" "${new_set_file}" "${headers}"
 done
+# escape special chars from set_names excluding '|'
+set_names=$(printf '%s' "${set_names}" | sed 's/[.[\*^$()+?{]/\\&/g')
+#purge not configured set names rules from blocklists chain of iptables
+rules=$(iptables -S"${blocklist_chain_name}"|grep -E '^-A .*--match-set'|grep -vE "(${set_names})"|cut -d' ' -f2-)
+echo ${rules} | xargs -r iptables -D
