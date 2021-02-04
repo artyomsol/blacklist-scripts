@@ -44,7 +44,7 @@ else
 
     # blocklist.net.ua
     # WARNING! blocklist.net.ua list includes local and private IP ranges like 127.0.0.0/8 and 10.0.0.0/8
-    # URLS="$URLS blocklist_net_ua|https://iplists.firehol.org/files/blocklist_net_ua.ipset"
+    #URLS="$URLS blocklist.net.ua|https://iplists.firehol.org/files/blocklist_net_ua.ipset"
 
     # Cisco TALOS IP blocklist
     URLS="$URLS talosintelligence.com|https://talosintelligence.com/documents/ip-blacklist"
@@ -213,4 +213,4 @@ done
 set_names=$(printf '%s' "${set_names}" | sed 's/[.[\*^$()+?{]/\\&/g')
 #purge not configured set names rules from blocklists chain of iptables
 rules=$(iptables -S"${blocklist_chain_name}"|grep -E '^-A .*--match-set'|grep -vE "(${set_names})"|cut -d' ' -f2-)
-echo ${rules} | xargs -r iptables -D
+echo -n "${rules}" | xargs -d '\n' -r -I {}  sh -c "iptables -D {}"
