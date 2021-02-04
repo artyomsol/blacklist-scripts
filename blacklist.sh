@@ -8,18 +8,18 @@
 LIMIT="10/minute"
 
 # try to load config file
-# it should contain one blacklist URL per line
-
+# it should define URLS variable as space separated list of blacklist sources in format of [SETNAME|]URL
 config_file="/etc/ip-blacklist.conf"
 if [ -f "${config_file}" ]; then
-    source ${config_file}
+    . ${config_file}
 else
     # if no config file is available, load default set of blacklists
     # URLs for further blocklists are appended using the classical
     # shell syntax:  "$URLS [SETNAME|]new_url"
+    URLS=""
 
     # Emerging Threats lists offensive IPs such as botnet command servers
-    URLS="emergingthreats.net|https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+    URLS="$URLS emergingthreats.net|https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
 
     # spamhaus drop and edrop
     URLS="$URLS spamhaus_drop|https://www.spamhaus.org/drop/drop.txt"
@@ -48,6 +48,9 @@ else
 
     # Cisco TALOS IP blocklist
     URLS="$URLS talosintelligence.com|https://talosintelligence.com/documents/ip-blacklist"
+
+    # abuseipdb blocklist (top 10000 IPs, updated once per 24h if used without subscription)
+    #URLS="$URLS abuseipdb.com|https://api.abuseipdb.com/api/v2/blacklist?confidenceMinimum=90&key=$ABUSEIPDB_API_KEY"
 fi
 
 link_set () {
@@ -144,7 +147,7 @@ do
     fi
     [ -n "${set_names}" ] && set_names="$set_names|$set_name" || set_names=$set_name
 
-    curl -L -v -s ${COMPRESS_OPT} -k "$url" >"${unsorted_blocklist}" 2>"${headers}"
+    curl -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}"
 
     # this is required for blocklist.de that sends compressed content regardless of asked or not
     if [ -z "$COMPRESS_OPT" ]; then
