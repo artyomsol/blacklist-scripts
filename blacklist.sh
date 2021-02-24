@@ -147,7 +147,7 @@ do
     fi
     [ -n "${set_names}" ] && set_names="$set_names|$set_name" || set_names=$set_name
 
-    curl -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}"
+    curl --fail -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}" || continue
 
     # this is required for blocklist.de that sends compressed content regardless of asked or not
     if [ -z "$COMPRESS_OPT" ]; then
