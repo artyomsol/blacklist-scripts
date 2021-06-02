@@ -63,6 +63,12 @@ link_set () {
   fi
 }
 
+# collect created set names to exclude them from blocklist chain purge stage
+set_names=""
+collect_set() {
+  [ -n "${set_names}" ] && set_names="${set_names}|${1}" || set_names=${1}
+}
+
 # This is how it will look like on the server
 
 # Chain blocklists (2 references)
@@ -124,9 +130,7 @@ if ! ipset list | grep -q "Name: ${set_name}"; then
     ipset create "${set_name}" hash:net
 fi
 link_set "${blocklist_chain_name}" "${set_name}" "$1"
-
-# collect created set names to exclude them from blocklist chain purge stage
-set_names=${set_name}
+collect_set "${set_name}"
 
 # download and process the dynamic blacklists
 for url in $URLS
@@ -145,7 +149,7 @@ do
     else
 	      url=$(echo "$url" | cut -d '|' -sf 2)
     fi
-    [ -n "${set_names}" ] && set_names="$set_names|$set_name" || set_names=$set_name
+    collect_set "$set_name"
 
     curl --fail -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}" || continue
 
