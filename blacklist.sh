@@ -64,7 +64,7 @@ link_set () {
 }
 
 # collect created set names to exclude them from blocklist chain purge stage
-set_names=""
+set_names="manual-whitelist"
 collect_set() {
   [ -n "${set_names}" ] && set_names="${set_names}|${1}" || set_names=${1}
 }
@@ -217,4 +217,4 @@ done
 set_names=$(printf '%s' "${set_names}" | sed 's/[.[\*^$()+?{]/\\&/g')
 #purge not configured set names rules from blocklists chain of iptables
 rules=$(iptables -S"${blocklist_chain_name}"|grep -E '^-A .*--match-set'|grep -vE "(${set_names})"|cut -d' ' -f2-)
-echo -n "${rules}" | xargs -d '\n' -r -I {}  sh -c "iptables -D {}"
+printf '%s' "${rules}" | xargs -d '\n' -r -I {}  sh -c "iptables -D {}"
