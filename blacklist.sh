@@ -132,15 +132,23 @@ fi
 link_set "${blocklist_chain_name}" "${set_name}" "$1"
 collect_set "${set_name}"
 
+init_temp_files () {
+  # initialize temp files
+  unsorted_blocklist=$(mktemp)
+  sorted_blocklist=$(mktemp)
+  new_set_file=$(mktemp)
+  headers=$(mktemp)
+}
+
+prune_temp_files () {
+  # clean up temp files
+  rm -f "${unsorted_blocklist}" "${sorted_blocklist}" "${new_set_file}" "${headers}"
+}
+
 # download and process the dynamic blacklists
 for url in $URLS
 do
-    # initialize temp files
-    unsorted_blocklist=$(mktemp)
-    sorted_blocklist=$(mktemp)
-    new_set_file=$(mktemp)
-    headers=$(mktemp)
-
+    init_temp_files
     # download the blocklist
     set_name=$(echo "$url" | cut -d '|' -sf 1)
     if [ -z "$set_name" ]; then
@@ -151,7 +159,10 @@ do
     fi
     collect_set "$set_name"
 
-    curl --fail -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}" || continue
+    if ! curl --fail -L -v -s ${COMPRESS_OPT} -k -H 'Accept: text/plain' "$url" >"${unsorted_blocklist}" 2>"${headers}"; then
+      prune_temp_files
+      continue
+    fi
 
     # this is required for blocklist.de that sends compressed content regardless of asked or not
     if [ -z "$COMPRESS_OPT" ]; then
@@ -170,6 +181,7 @@ do
             mv "${awk_tmp}" "${unsorted_blocklist}"
         else
             echo "range2cidr.awk script not found, cannot process ${unsorted_blocklist}, skipping"
+            prune_temp_files
             continue
         fi
     fi
@@ -209,9 +221,7 @@ do
     ipset -! -q restore < "${new_set_file}"
 
     link_set "${blocklist_chain_name}" "${set_name}" "$1"
-
-    # clean up temp files
-    rm -f "${unsorted_blocklist}" "${sorted_blocklist}" "${new_set_file}" "${headers}"
+    prune_temp_files
 done
 # escape special chars from set_names excluding '|'
 set_names=$(printf '%s' "${set_names}" | sed 's/[.[\*^$()+?{]/\\&/g')
